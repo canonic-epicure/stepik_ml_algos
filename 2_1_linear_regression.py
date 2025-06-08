@@ -97,6 +97,7 @@ class MyLineReg:
             return self.r2
         else:
             return None
+
     def predict(self, X: pd.DataFrame):
         X.insert(0, '__x0__', 1.0)
         features = X.to_numpy()
