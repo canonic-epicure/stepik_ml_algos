@@ -6,9 +6,12 @@ df.columns = ['variance', 'skewness', 'curtosis', 'entropy', 'target']
 X, y = df.iloc[:,:4], df['target']
 
 #-------------------------------------------
-def get_best_split(X: pd.DataFrame, y):
+def get_best_split(X: pd.DataFrame, y, splits, criterion):
 
     def get_entropy(targets):
+        if targets.size == 0:
+            return 0
+
         zeros = np.where(targets == 0, 1, 0).sum()
 
         ones = targets.size - zeros
@@ -17,6 +20,19 @@ def get_best_split(X: pd.DataFrame, y):
         prob_ones = ones / targets.size
 
         return -((0 if prob_zero == 0 else prob_zero * np.log2(prob_zero)) + (0 if prob_ones == 0 else prob_ones * np.log2(prob_ones)))
+
+    def get_gini(targets):
+        if targets.size == 0:
+            return 1
+
+        zeros = np.where(targets == 0, 1, 0).sum()
+
+        ones = targets.size - zeros
+
+        prob_zero = zeros / targets.size
+        prob_ones = ones / targets.size
+
+        return 1 - prob_zero ** 2 - prob_ones **2
 
     def get_info_gain(features, targets, split):
         initial_entropy = get_entropy(targets)
@@ -34,6 +50,22 @@ def get_best_split(X: pd.DataFrame, y):
 
         return initial_entropy - (left_entropy * left_idx.size / targets.size + right_entropy * right_idx.size / targets.size)
 
+    def get_gini_gain(features, targets, split):
+        initial_gini = get_gini(targets)
+
+        sorted_idx = np.argsort(features)
+        sorted = features[ sorted_idx ]
+
+        idx = np.searchsorted(sorted, split, side='right')
+
+        left_idx = sorted_idx[:idx]
+        left_gini = get_gini(targets[ left_idx ])
+
+        right_idx = sorted_idx[idx:]
+        right_gini = get_gini(targets[ right_idx])
+
+        return initial_gini - (left_gini * left_idx.size / targets.size + right_gini * right_idx.size / targets.size)
+
     targets = y.to_numpy()
 
     col_name = None
@@ -43,13 +75,16 @@ def get_best_split(X: pd.DataFrame, y):
     for col in X.columns:
         features = X[ col ].to_numpy()
 
-        unique, counts = np.unique(features, return_counts=True)
+        if splits[ col ].size > 0:
+            delimiters = splits[ col ]
+        else:
+            unique = np.unique(features)
 
-        delimiters = (unique[0:-1] + unique[1:]) / 2
+            delimiters = (unique[0:-1] + unique[1:]) / 2
 
         entropy_deltas = np.array(
             list(map(
-                lambda delim: get_info_gain(features, targets, delim),
+                lambda delim: get_info_gain(features, targets, delim) if criterion == 'entropy' else get_gini_gain(features, targets, delim),
                 delimiters
             ))
         )
@@ -85,13 +120,15 @@ def for_each_node(node, func, level=0, side=None):
 
 #-------------------------------------------
 class MyTreeClf:
-    def __init__(self, max_depth=5, min_samples_split=2, max_leafs=20, bins=None):
+    def __init__(self, max_depth=5, min_samples_split=2, max_leafs=20, bins=None, criterion='entropy'):
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.max_leafs = max_leafs
         self.leafs_cnt = 0
         self.root = None
         self.bins = bins
+        self.splits = None
+        self.criterion = criterion
 
     def __str__(self):
         return f'MyTreeClf class: max_depth={ self.max_depth }, min_samples_split={ self.min_samples_split }, max_leafs={ self.max_leafs }'
@@ -108,12 +145,11 @@ class MyTreeClf:
                 or self.leafs_cnt + 1 >= self.max_leafs or depth >= self.max_depth or count < self.min_samples_split
             )
         ):
-
             self.leafs_cnt += 1
 
             return { 'type' : 'leaf', 'one_prob' : y.to_numpy().mean() }
         else:
-            col_name, split_value, ig = get_best_split(X, y)
+            col_name, split_value, ig = get_best_split(X, y, self.splits, self.criterion)
 
             features = X[ col_name ].to_numpy()
 
@@ -121,6 +157,11 @@ class MyTreeClf:
             sorted = features[ sorted_idx ]
 
             idx = np.searchsorted(sorted, split_value, side='right')
+
+            if idx == 0 or idx == features.shape[-1]:
+                self.leafs_cnt += 1
+
+                return { 'type' : 'leaf', 'one_prob' : y.to_numpy().mean() }
 
             lefts_idx = sorted_idx[ :idx ]
             rights_idx = sorted_idx[ idx: ]
@@ -134,6 +175,26 @@ class MyTreeClf:
             }
 
     def fit(self, X, y):
+        def get_unique_splits(X):
+            unique = np.unique(X.to_numpy())
+
+            return (unique[0:-1] + unique[1:]) / 2
+
+        def get_histogram_splits(X):
+            histogram_counts, histogram_boundaries = np.histogram(X.to_numpy(), bins=self.bins)
+
+            return histogram_boundaries[ 1:-1 ]
+
+        def get_splits(X):
+            unique_splits = get_unique_splits(X)
+
+            if self.bins == None or unique_splits.size <= self.bins - 1:
+                return np.array([])
+            else:
+                return get_histogram_splits(X)
+
+        self.splits = X.apply(get_splits, axis=0)
+
         self.leafs_cnt = 0
         self.root = self.build_tree(X, y, 0, 0)
 
@@ -161,7 +222,7 @@ class MyTreeClf:
                 if node[ 'type' ] == 'leaf':
                     prob = node[ 'one_prob' ]
                 else:
-                    value = x[ node[ 'col_name' ]]
+                    value = x[ node[ 'col_name' ] ]
 
                     if value > node[ 'split_value' ]:
                         predict(node[ 'right' ])
@@ -174,7 +235,7 @@ class MyTreeClf:
 
         return X.apply(predict_single, axis=1)
 
-clf = MyTreeClf(max_depth=5, min_samples_split=200, max_leafs=10)
+clf = MyTreeClf(max_depth=5, min_samples_split=200, max_leafs=10, bins=4)
 
 clf.fit(X, y)
 
