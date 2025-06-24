@@ -6,66 +6,68 @@ df.columns = ['variance', 'skewness', 'curtosis', 'entropy', 'target']
 X, y = df.iloc[:,:4], df['target']
 
 #-------------------------------------------
+def get_entropy(targets):
+    if targets.size == 0:
+        return 0
+
+    zeros = np.where(targets == 0, 1, 0).sum()
+
+    ones = targets.size - zeros
+
+    prob_zero = zeros / targets.size
+    prob_ones = ones / targets.size
+
+    return -((0 if prob_zero == 0 else prob_zero * np.log2(prob_zero)) + (0 if prob_ones == 0 else prob_ones * np.log2(prob_ones)))
+
+def get_gini(targets):
+    if targets.size == 0:
+        return 1
+
+    zeros = np.where(targets == 0, 1, 0).sum()
+
+    ones = targets.size - zeros
+
+    prob_zero = zeros / targets.size
+    prob_ones = ones / targets.size
+
+    return 1 - prob_zero ** 2 - prob_ones **2
+
+def get_i(targets, criterion):
+    return get_gini(targets) if criterion == 'gini' else get_entropy(targets)
+
+def get_info_gain(features, targets, split):
+    initial_entropy = get_entropy(targets)
+
+    sorted_idx = np.argsort(features)
+    sorted = features[ sorted_idx ]
+
+    idx = np.searchsorted(sorted, split, side='right')
+
+    left_idx = sorted_idx[:idx]
+    left_entropy = get_entropy(targets[ left_idx ])
+
+    right_idx = sorted_idx[idx:]
+    right_entropy = get_entropy(targets[ right_idx])
+
+    return initial_entropy - (left_entropy * left_idx.size / targets.size + right_entropy * right_idx.size / targets.size)
+
+def get_gini_gain(features, targets, split):
+    initial_gini = get_gini(targets)
+
+    sorted_idx = np.argsort(features)
+    sorted = features[ sorted_idx ]
+
+    idx = np.searchsorted(sorted, split, side='right')
+
+    left_idx = sorted_idx[:idx]
+    left_gini = get_gini(targets[ left_idx ])
+
+    right_idx = sorted_idx[idx:]
+    right_gini = get_gini(targets[ right_idx])
+
+    return initial_gini - (left_gini * left_idx.size / targets.size + right_gini * right_idx.size / targets.size)
+
 def get_best_split(X: pd.DataFrame, y, splits, criterion):
-
-    def get_entropy(targets):
-        if targets.size == 0:
-            return 0
-
-        zeros = np.where(targets == 0, 1, 0).sum()
-
-        ones = targets.size - zeros
-
-        prob_zero = zeros / targets.size
-        prob_ones = ones / targets.size
-
-        return -((0 if prob_zero == 0 else prob_zero * np.log2(prob_zero)) + (0 if prob_ones == 0 else prob_ones * np.log2(prob_ones)))
-
-    def get_gini(targets):
-        if targets.size == 0:
-            return 1
-
-        zeros = np.where(targets == 0, 1, 0).sum()
-
-        ones = targets.size - zeros
-
-        prob_zero = zeros / targets.size
-        prob_ones = ones / targets.size
-
-        return 1 - prob_zero ** 2 - prob_ones **2
-
-    def get_info_gain(features, targets, split):
-        initial_entropy = get_entropy(targets)
-
-        sorted_idx = np.argsort(features)
-        sorted = features[ sorted_idx ]
-
-        idx = np.searchsorted(sorted, split, side='right')
-
-        left_idx = sorted_idx[:idx]
-        left_entropy = get_entropy(targets[ left_idx ])
-
-        right_idx = sorted_idx[idx:]
-        right_entropy = get_entropy(targets[ right_idx])
-
-        return initial_entropy - (left_entropy * left_idx.size / targets.size + right_entropy * right_idx.size / targets.size)
-
-    def get_gini_gain(features, targets, split):
-        initial_gini = get_gini(targets)
-
-        sorted_idx = np.argsort(features)
-        sorted = features[ sorted_idx ]
-
-        idx = np.searchsorted(sorted, split, side='right')
-
-        left_idx = sorted_idx[:idx]
-        left_gini = get_gini(targets[ left_idx ])
-
-        right_idx = sorted_idx[idx:]
-        right_gini = get_gini(targets[ right_idx])
-
-        return initial_gini - (left_gini * left_idx.size / targets.size + right_gini * right_idx.size / targets.size)
-
     targets = y.to_numpy()
 
     col_name = None
@@ -118,6 +120,7 @@ def for_each_node(node, func, level=0, side=None):
         for_each_node(node[ 'left' ], func, level + 1, 'left')
         for_each_node(node[ 'right' ], func, level + 1, 'right')
 
+
 #-------------------------------------------
 class MyTreeClf:
     def __init__(self, max_depth=5, min_samples_split=2, max_leafs=20, bins=None, criterion='entropy'):
@@ -129,6 +132,8 @@ class MyTreeClf:
         self.bins = bins
         self.splits = None
         self.criterion = criterion
+        self.fi = {}
+        self.total_n = 0
 
     def __str__(self):
         return f'MyTreeClf class: max_depth={ self.max_depth }, min_samples_split={ self.min_samples_split }, max_leafs={ self.max_leafs }'
@@ -152,6 +157,7 @@ class MyTreeClf:
             col_name, split_value, ig = get_best_split(X, y, self.splits, self.criterion)
 
             features = X[ col_name ].to_numpy()
+            targets = y.to_numpy()
 
             sorted_idx = np.argsort(features)
             sorted = features[ sorted_idx ]
@@ -171,7 +177,12 @@ class MyTreeClf:
                 'col_name' : col_name,
                 'split_value' : split_value,
                 'left' : self.build_tree(X.iloc[ lefts_idx ], y.iloc[ lefts_idx ], leaf_count + 2, depth + 1),
-                'right' : self.build_tree(X.iloc[ rights_idx ], y.iloc[ rights_idx ], leaf_count + 2, depth + 1)
+                'right' : self.build_tree(X.iloc[ rights_idx ], y.iloc[ rights_idx ], leaf_count + 2, depth + 1),
+                'importance' : features.size / self.total_n * (
+                    get_i(targets, self.criterion)
+                    - lefts_idx.size / features.size * get_i(y.iloc[ lefts_idx ], self.criterion)
+                    - rights_idx.size / features.size * get_i(y.iloc[ rights_idx ], self.criterion)
+                )
             }
 
     def fit(self, X, y):
@@ -193,10 +204,21 @@ class MyTreeClf:
             else:
                 return get_histogram_splits(X)
 
+        self.total_n = X.shape[0]
+
+        for col in X.columns:
+            self.fi[ col ] = 0
+
         self.splits = X.apply(get_splits, axis=0)
 
         self.leafs_cnt = 0
         self.root = self.build_tree(X, y, 0, 0)
+
+        def count(node, _, __):
+            if node[ 'type' ] == 'node':
+                self.fi[ node[ 'col_name'] ] += node[ 'importance' ]
+
+        for_each_node(self.root, count)
 
     def print_tree(self):
         def printer(node, level, side):
