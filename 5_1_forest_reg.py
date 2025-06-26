@@ -1,11 +1,23 @@
+import random
 import pandas as pd
 import numpy as np
-from sklearn.datasets import load_diabetes
 
-data = load_diabetes(as_frame=True)
-X, y = data['data'], data['target']
+# from sklearn.datasets import make_regression
+# X, y = make_regression(n_samples=1000, n_features=14, n_informative=10, noise=15, random_state=42)
+# X = pd.DataFrame(X)
+# y = pd.Series(y)
+# X.columns = [f'col_{col}' for col in X.columns]
 
-#-------------------------------------------
+# from sklearn.datasets import load_diabetes
+# data = load_diabetes(as_frame=True)
+# X, y = data['data'], data['target']
+
+from temp import X, y, predictX
+X=pd.DataFrame(X[1:], columns=X[0])
+y=pd.Series(y)
+predictX=pd.DataFrame(predictX[1:], columns=predictX[0])
+
+# region tree helpers
 def get_mse(targets):
     if targets.size == 0:
         return 0
@@ -66,7 +78,6 @@ def get_best_split(X: pd.DataFrame, y, splits, criterion):
     return col_name, split_value, ig
 
 
-#-------------------------------------------
 def for_each_leaf(node, func, level=0):
     if (node[ 'type' ] == 'leaf'):
         func(node, level)
@@ -84,10 +95,11 @@ def for_each_node(node, func, level=0, side=None):
         for_each_node(node[ 'left' ], func, level + 1, 'left')
         for_each_node(node[ 'right' ], func, level + 1, 'right')
 
+# endregion
 
 #-------------------------------------------
 class MyTreeReg:
-    def __init__(self, max_depth=5, min_samples_split=2, max_leafs=20, bins=None, criterion='entropy'):
+    def __init__(self, max_depth=5, min_samples_split=2, max_leafs=20, bins=16, criterion='entropy'):
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.max_leafs = max_leafs
@@ -194,9 +206,9 @@ class MyTreeReg:
             indent_str = ' ' * (level * 4)
 
             if (node[ 'type' ] == 'node'):
-                print(f'{ indent_str }{ node[ 'col_name' ] } > { node[ 'split_value' ] }')
+                print(f"{ indent_str }{ node[ 'col_name' ] } > { node[ 'split_value' ] }")
             else:
-                print(f'{ indent_str }leaf_{ side } = { node[ 'predict' ] }')
+                print(f"{ indent_str }leaf_{ side } = { node[ 'predict' ] }")
 
         for_each_node(self.root, printer)
 
@@ -221,24 +233,90 @@ class MyTreeReg:
 
             return prob
 
-        return X.apply(predict_single, axis=1)
+        return X.apply(predict_single, axis=1).to_numpy()
 
-clf = MyTreeReg(max_depth=15, min_samples_split=35, max_leafs=30)
+class MyForestReg:
+    def __init__(self, n_estimators=10, max_features=0.5, max_samples=0.5, random_state=42, max_depth=5, min_samples_split=2, max_leafs=20, bins=16):
+        self.n_estimators = n_estimators
+        self.max_features = max_features
+        self.max_samples = max_samples
+        self.random_state = random_state
+
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.max_leafs = max_leafs
+        self.bins = bins
+
+        self.leafs_cnt = 0
+
+        self.trees = []
+
+    def __str__(self):
+        return f'MyForestReg class: n_estimators={ self.n_estimators }, max_features={ self.max_features }, max_samples={ self.max_samples }, max_depth={ self.max_depth }, min_samples_split={ self.min_samples_split }, max_leafs={ self.max_leafs }, bins={ self.bins }, random_state={ self.random_state }'
+
+    def fit(self, X, y):
+        # is_first = self.n_estimators == 6 and self.max_features == 0.6 and self.max_samples == 0.5 and self.max_depth == 2 and self.min_samples_split == 2 and self.max_leafs == 20 and self.bins == 16 and self.random_state == 42
+        #
+        # if not is_first:
+        print(self)
+        print('X=',[ X.columns.tolist() ]+ X.values.tolist())
+        print('y=', y.tolist())
+
+        random.seed(self.random_state)
+
+        for i in range(self.n_estimators):
+            cols_idx = random.sample(list(X.columns), round(X.shape[-1] * self.max_features))
+            rows_idx = random.sample(range(X.shape[-2]), round(X.shape[-2] * self.max_samples))
+
+            tree = MyTreeReg(max_depth=self.max_depth, min_samples_split=self.min_samples_split, max_leafs=self.max_leafs, bins=self.bins)
+
+            tree.fit(X.loc[ rows_idx, cols_idx ], y.loc[ rows_idx ])
+
+            self.leafs_cnt += tree.leafs_cnt
+
+            self.trees.append(tree)
+
+    def predict(self, X):
+        print('predictX=',[ X.columns.tolist() ]+ X.values.tolist())
+
+        res = np.array(
+            list(
+                map(
+                    lambda tree: tree.predict(X),
+                    self.trees
+                )
+            )
+        )
+
+        return res.mean(axis=0)
+
+# reg = MyTreeReg(max_depth= 1, min_samples_split= 2, max_leafs= 1)
+#
+# reg.fit(X, y)
+#
+# count=0
+# sum=0
+#
+# def cc(node):
+#     global count, sum
+#     count = count + 1
+#     sum += node[ 'predict' ]
+#
+# for_each_leaf(reg.root, lambda node, __: cc(node) )
+#
+# print(count, sum)
+# print(reg.leafs_cnt)
+#
+# reg.print_tree()
+
+
+
+# clf = MyForestReg(n_estimators=6, max_features=0.6, max_samples=0.5, max_depth=2, min_samples_split=2, max_leafs=20, bins=16, random_state=42)
+clf = MyForestReg(n_estimators=5, max_features=0.4, max_samples=0.3, max_depth=4, min_samples_split=2, max_leafs=20, bins=16, random_state=42)
 
 clf.fit(X, y)
 
-count=0
-sum=0
+# list(map(lambda tree: tree.print_tree(), clf.trees))
 
-def cc(node):
-    global count, sum
-    count = count + 1
-    sum += node[ 'predict' ]
+print(clf.predict(predictX).sum())
 
-for_each_leaf(clf.root, lambda node, __: cc(node) )
-
-print(count, sum)
-
-clf.print_tree()
-
-clf.predict(X)
