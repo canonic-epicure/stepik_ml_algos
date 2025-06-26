@@ -2,7 +2,7 @@ import random
 import pandas as pd
 import numpy as np
 
-# from sklearn.datasets import make_regression
+from sklearn.datasets import make_regression
 # X, y = make_regression(n_samples=1000, n_features=14, n_informative=10, noise=15, random_state=42)
 # X = pd.DataFrame(X)
 # y = pd.Series(y)
@@ -12,10 +12,16 @@ import numpy as np
 # data = load_diabetes(as_frame=True)
 # X, y = data['data'], data['target']
 
-from temp import X, y, predictX
-X=pd.DataFrame(X[1:], columns=X[0])
-y=pd.Series(y)
-predictX=pd.DataFrame(predictX[1:], columns=predictX[0])
+# from temp import X, y, predictX
+# X=pd.DataFrame(X[1:], columns=X[0])
+# y=pd.Series(y)
+# predictX=pd.DataFrame(predictX[1:], columns=predictX[0])
+
+X, y = make_regression(n_samples=150, n_features=14, n_informative=10, noise=15, random_state=42)
+X = pd.DataFrame(X).round(2)
+y = pd.Series(y)
+X.columns = [f'col_{col}' for col in X.columns]
+test = X.sample(20, random_state=42)
 
 # region tree helpers
 def get_mse(targets):
@@ -67,12 +73,14 @@ def get_best_split(X: pd.DataFrame, y, splits, criterion):
             ))
         )
 
-        delim_sorted_idx = np.argsort(gains)
-        max_gain = gains[ delim_sorted_idx[ -1 ] ]
+        gains_unique, gains_unique_idx = np.unique(gains, return_index=True)
+
+        delim_sorted_idx = np.argsort(gains_unique, kind='mergesort')
+        max_gain = gains_unique[ delim_sorted_idx[ -1 ] ]
 
         if (col_name == None or ig < max_gain):
             col_name = col
-            split_value = delimiters[ delim_sorted_idx[ -1 ] ]
+            split_value = delimiters[ gains_unique_idx[ delim_sorted_idx[ -1 ] ] ]
             ig = max_gain
 
     return col_name, split_value, ig
@@ -210,6 +218,7 @@ class MyTreeReg:
             else:
                 print(f"{ indent_str }leaf_{ side } = { node[ 'predict' ] }")
 
+        print(self)
         for_each_node(self.root, printer)
 
     def predict(self, X):
@@ -255,13 +264,6 @@ class MyForestReg:
         return f'MyForestReg class: n_estimators={ self.n_estimators }, max_features={ self.max_features }, max_samples={ self.max_samples }, max_depth={ self.max_depth }, min_samples_split={ self.min_samples_split }, max_leafs={ self.max_leafs }, bins={ self.bins }, random_state={ self.random_state }'
 
     def fit(self, X, y):
-        # is_first = self.n_estimators == 6 and self.max_features == 0.6 and self.max_samples == 0.5 and self.max_depth == 2 and self.min_samples_split == 2 and self.max_leafs == 20 and self.bins == 16 and self.random_state == 42
-        #
-        # if not is_first:
-        print(self)
-        print('X=',[ X.columns.tolist() ]+ X.values.tolist())
-        print('y=', y.tolist())
-
         random.seed(self.random_state)
 
         for i in range(self.n_estimators):
@@ -277,8 +279,6 @@ class MyForestReg:
             self.trees.append(tree)
 
     def predict(self, X):
-        print('predictX=',[ X.columns.tolist() ]+ X.values.tolist())
-
         res = np.array(
             list(
                 map(
@@ -290,33 +290,11 @@ class MyForestReg:
 
         return res.mean(axis=0)
 
-# reg = MyTreeReg(max_depth= 1, min_samples_split= 2, max_leafs= 1)
-#
-# reg.fit(X, y)
-#
-# count=0
-# sum=0
-#
-# def cc(node):
-#     global count, sum
-#     count = count + 1
-#     sum += node[ 'predict' ]
-#
-# for_each_leaf(reg.root, lambda node, __: cc(node) )
-#
-# print(count, sum)
-# print(reg.leafs_cnt)
-#
-# reg.print_tree()
-
-
-
-# clf = MyForestReg(n_estimators=6, max_features=0.6, max_samples=0.5, max_depth=2, min_samples_split=2, max_leafs=20, bins=16, random_state=42)
 clf = MyForestReg(n_estimators=5, max_features=0.4, max_samples=0.3, max_depth=4, min_samples_split=2, max_leafs=20, bins=16, random_state=42)
 
 clf.fit(X, y)
 
 # list(map(lambda tree: tree.print_tree(), clf.trees))
 
-print(clf.predict(predictX).sum())
+print(clf.predict(test).sum())
 
