@@ -107,7 +107,7 @@ def for_each_node(node, func, level=0, side=None):
 
 #-------------------------------------------
 class MyTreeReg:
-    def __init__(self, max_depth=5, min_samples_split=2, max_leafs=20, bins=16, criterion='entropy'):
+    def __init__(self, max_depth=5, min_samples_split=2, max_leafs=20, bins=16, criterion='entropy', total_n=0):
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.max_leafs = max_leafs
@@ -117,7 +117,7 @@ class MyTreeReg:
         self.splits = None
         self.criterion = criterion
         self.fi = {}
-        self.total_n = 0
+        self.total_n = total_n
 
     def __str__(self):
         return f'MyTreeReg class: max_depth={ self.max_depth }, min_samples_split={ self.min_samples_split }, max_leafs={ self.max_leafs }'
@@ -193,8 +193,6 @@ class MyTreeReg:
             else:
                 return get_histogram_splits(X)
 
-        self.total_n = X.shape[0]
-
         for col in X.columns:
             self.fi[ col ] = 0
 
@@ -245,7 +243,7 @@ class MyTreeReg:
         return X.apply(predict_single, axis=1).to_numpy()
 
 class MyForestReg:
-    def __init__(self, n_estimators=10, max_features=0.5, max_samples=0.5, random_state=42, max_depth=5, min_samples_split=2, max_leafs=20, bins=16):
+    def __init__(self, n_estimators=10, max_features=0.5, max_samples=0.5, random_state=42, max_depth=5, min_samples_split=2, max_leafs=20, bins=16, oob_score=None):
         self.n_estimators = n_estimators
         self.max_features = max_features
         self.max_samples = max_samples
@@ -259,6 +257,10 @@ class MyForestReg:
         self.leafs_cnt = 0
 
         self.trees = []
+        self.fi = {}
+
+        self.oob_score = oob_score
+        self.oob_score_ = 0
 
     def __str__(self):
         return f'MyForestReg class: n_estimators={ self.n_estimators }, max_features={ self.max_features }, max_samples={ self.max_samples }, max_depth={ self.max_depth }, min_samples_split={ self.min_samples_split }, max_leafs={ self.max_leafs }, bins={ self.bins }, random_state={ self.random_state }'
@@ -266,17 +268,62 @@ class MyForestReg:
     def fit(self, X, y):
         random.seed(self.random_state)
 
-        for i in range(self.n_estimators):
-            cols_idx = random.sample(list(X.columns), round(X.shape[-1] * self.max_features))
-            rows_idx = random.sample(range(X.shape[-2]), round(X.shape[-2] * self.max_samples))
+        self.total_n = X.shape[0]
+        for col in X.columns:
+            self.fi[ col ] = 0
 
-            tree = MyTreeReg(max_depth=self.max_depth, min_samples_split=self.min_samples_split, max_leafs=self.max_leafs, bins=self.bins)
+        columns = list(X.columns)
+        rows = range(X.shape[-2])
+        rows_numpy = np.array(rows)
+
+        oob_predictions = list(map(lambda _: [], rows))
+
+        for i in range(self.n_estimators):
+            cols_idx = random.sample(columns, round(X.shape[-1] * self.max_features))
+            rows_idx = random.sample(rows, round(X.shape[-2] * self.max_samples))
+
+            tree = MyTreeReg(max_depth=self.max_depth, min_samples_split=self.min_samples_split, max_leafs=self.max_leafs, bins=self.bins, total_n=self.total_n)
 
             tree.fit(X.loc[ rows_idx, cols_idx ], y.loc[ rows_idx ])
+
+            rows_mask = np.ones(len(rows), dtype=bool)
+            rows_mask[ rows_idx ] = False
+
+            predictions = tree.predict(X.loc[ rows_mask, cols_idx ])
+
+            for idx, value in enumerate(rows_numpy[ rows_mask ]):
+                oob_predictions[ value ].append(predictions[ idx ])
 
             self.leafs_cnt += tree.leafs_cnt
 
             self.trees.append(tree)
+
+        for tree in self.trees:
+            for col in X.columns:
+                self.fi[ col ] += tree.fi[ col ] if col in tree.fi else 0
+
+        oob_predictions = np.array(list(map(lambda pred: np.nan if len(pred) == 0 else np.array(pred).mean(), oob_predictions)))
+
+        oob_not_nan_idx = ~np.isnan(oob_predictions)
+
+        targets = y.to_numpy()
+
+        pred = oob_predictions[ oob_not_nan_idx ]
+        targ = targets[ oob_not_nan_idx ]
+
+        if self.oob_score == 'mse':
+            self.oob_score_ = ((pred - targ) ** 2).mean()
+        elif self.oob_score == 'rmse':
+            self.oob_score_ = np.sqrt(((pred - targ) ** 2).mean())
+        elif self.oob_score == 'mae':
+            self.oob_score_ = np.abs(pred - targ).mean()
+        elif self.oob_score == 'mape':
+            self.oob_score_ = 100 / pred.shape[-1] * np.abs((targ - pred) / targ).sum()
+        elif self.oob_score == 'r2':
+            self.oob_score_ = 1 - ((pred - targ) ** 2).mean() / targ.var()
+        elif self.oob_score != None:
+            raise f"Unknown metric: { self.oob_score }"
+
 
     def predict(self, X):
         res = np.array(
@@ -290,11 +337,13 @@ class MyForestReg:
 
         return res.mean(axis=0)
 
-clf = MyForestReg(n_estimators=5, max_features=0.4, max_samples=0.3, max_depth=4, min_samples_split=2, max_leafs=20, bins=16, random_state=42)
+clf = MyForestReg(n_estimators=5, max_features=0.4, max_samples=0.3, max_depth=4, min_samples_split=2, max_leafs=20, bins=16, random_state=42, oob_score='mae')
 
 clf.fit(X, y)
 
 # list(map(lambda tree: tree.print_tree(), clf.trees))
 
-print(clf.predict(test).sum())
+# print(clf.predict(test).sum())
+
+print(clf.oob_score_)
 
