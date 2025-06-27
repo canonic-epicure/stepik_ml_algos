@@ -143,7 +143,6 @@ class MyTreeClf:
 
         targets_sum = y.to_numpy().sum()
 
-
         if (
             depth > 0 and (
                 count == 1 or targets_sum == 0 or targets_sum == count
