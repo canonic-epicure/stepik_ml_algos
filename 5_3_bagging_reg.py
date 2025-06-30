@@ -568,10 +568,6 @@ class MyBaggingReg:
 
             self.estimators.append(model)
 
-        # for model in self.trees:
-        #     for col in X.columns:
-        #         self.fi[ col ] += model.fi[ col ] if col in model.fi else 0
-        #
         oob_predictions = np.array(list(map(lambda pred: np.nan if len(pred) == 0 else np.array(pred).mean(), oob_predictions)))
 
         oob_not_nan_idx = ~np.isnan(oob_predictions)
@@ -593,20 +589,6 @@ class MyBaggingReg:
             self.oob_score_ = 1 - ((pred - targ) ** 2).mean() / targ.var()
         elif self.oob_score != None:
             raise f"Unknown metric: { self.oob_score }"
-
-
-    # def predict(self, X, type='mean'):
-    #     if type == 'mean':
-    #         return self.predict_proba(X) > 0.5
-    #     elif type == 'vote':
-    #         res = np.array(list(map(
-    #             lambda tree: (tree.predict(X) > 0.5) * 1,
-    #             self.trees
-    #         )))
-    #
-    #         return np.intc(np.round(res.mean(axis=0)))
-    #     else:
-    #         raise "Unknown prediction type"
 
     def predict(self, X):
         res = np.array(list(map(
