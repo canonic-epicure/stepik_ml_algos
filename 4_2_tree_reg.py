@@ -55,8 +55,10 @@ def get_best_split(X: pd.DataFrame, y, splits, criterion):
             ))
         )
 
-        delim_sorted_idx = np.argsort(gains)
-        max_gain = gains[ delim_sorted_idx[ -1 ] ]
+        gains_unique, gains_unique_idx = np.unique(gains, return_index=True)
+
+        delim_sorted_idx = np.argsort(gains_unique, kind='mergesort')
+        max_gain = gains_unique[ delim_sorted_idx[ -1 ] ]
 
         if (col_name == None or ig < max_gain):
             col_name = col
@@ -221,7 +223,7 @@ class MyTreeReg:
 
             return prob
 
-        return X.apply(predict_single, axis=1)
+        return X.apply(predict_single, axis=1).to_numpy()
 
 clf = MyTreeReg(max_depth=15, min_samples_split=35, max_leafs=30)
 
